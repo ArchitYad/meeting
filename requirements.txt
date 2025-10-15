@@ -1,4 +1,6 @@
 streamlit
+pydub
+imageio-ffmpeg
 groq
 google-generativeai
-imageio-ffmpeg
+python-dotenv
