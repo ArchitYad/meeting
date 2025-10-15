@@ -3,3 +3,4 @@ groq
 google-generativeai
 pydub
 imageio-ffmpeg
+python-dotenv
