@@ -3,7 +3,9 @@ import tempfile
 import streamlit as st
 from groq import Groq
 import google.generativeai as genai
-from pydub import AudioSegment
+
+# Use a forked version of pydub utils that doesn't import pyaudioop
+from pydub.audio_segment import AudioSegment
 import imageio_ffmpeg as ffmpeg
 
 # Force pydub to use ffmpeg from imageio-ffmpeg
