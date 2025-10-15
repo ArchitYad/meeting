@@ -1,0 +1,5 @@
+streamlit
+groq
+google-generativeai
+pydub
+imageio-ffmpeg
