@@ -1,66 +1,54 @@
 import os
-import tempfile
-import subprocess
+import io
 import streamlit as st
 from groq import Groq
 import google.generativeai as genai
 
-# ------------------- SECRETS -------------------
-GROQ_API_KEY = st.secrets.get("GROQ_API_KEY") or os.getenv("GROQ_API_KEY")
-GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+# ---------------------------
+# Load API keys
+# ---------------------------
+GROQ_API_KEY = st.secrets["GROQ_API_KEY"]
+GEMINI_API_KEY = st.secrets["GEMINI_API_KEY"]
 
-# ------------------- INIT CLIENTS -------------------
 groq_client = Groq(api_key=GROQ_API_KEY)
 genai.configure(api_key=GEMINI_API_KEY)
 gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
-# ------------------- STREAMLIT UI -------------------
-st.title("🎙️ Meeting Audio Summarizer")
-st.write("Upload your meeting audio (mp3, wav, m4a, etc.) and get a transcript & summary.")
+# ---------------------------
+# Streamlit UI
+# ---------------------------
+st.title("Meeting Summarizer with Chunking")
 
-uploaded_file = st.file_uploader("Choose an audio file", type=["mp3", "wav", "m4a", "ogg"])
+uploaded_file = st.file_uploader("Upload your audio file (mp3, m4a, wav)", type=["mp3", "m4a", "wav"])
 
-def convert_to_wav(input_path, output_path):
-    """Convert audio to WAV using ffmpeg subprocess"""
-    subprocess.run(["ffmpeg", "-y", "-i", input_path, output_path], check=True)
-
-if uploaded_file:
+if uploaded_file is not None:
     st.info("Processing audio… this may take a few moments.")
-    transcript_text = ""
-    summary_text = ""
+    
+    # Define chunk size in bytes (e.g., ~5MB per chunk)
+    CHUNK_SIZE = 5 * 1024 * 1024
+    audio_bytes = uploaded_file.read()
+    total_size = len(audio_bytes)
+
+    transcripts = []
     try:
-        # Save uploaded file temporarily
-        with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_file.name.split('.')[-1]}") as temp_file:
-            temp_file.write(uploaded_file.read())
-            temp_path = temp_file.name
+        for start in range(0, total_size, CHUNK_SIZE):
+            chunk_bytes = audio_bytes[start:start+CHUNK_SIZE]
+            chunk_file = io.BytesIO(chunk_bytes)
+            chunk_file.name = uploaded_file.name  # Groq needs a filename
 
-        # Convert to WAV
-        wav_path = tempfile.NamedTemporaryFile(delete=False, suffix=".wav").name
-        convert_to_wav(temp_path, wav_path)
-
-        # Split audio into 2-min chunks using ffmpeg
-        chunk_dir = tempfile.mkdtemp()
-        subprocess.run([
-            "ffmpeg", "-i", wav_path, "-f", "segment", "-segment_time", "120",
-            "-c", "copy", os.path.join(chunk_dir, "chunk%03d.wav")
-        ], check=True)
-
-        # Transcribe each chunk
-        transcripts = []
-        for chunk_file in sorted(os.listdir(chunk_dir)):
-            chunk_path = os.path.join(chunk_dir, chunk_file)
-            with open(chunk_path, "rb") as f:
-                transcription = groq_client.audio.transcriptions.create(
-                    file=(chunk_file, f.read()),
-                    model="whisper-large-v3"
-                )
+            # Transcribe chunk
+            transcription = groq_client.audio.transcriptions.create(
+                file=(chunk_file.name, chunk_file.read()),
+                model="whisper-large-v3"
+            )
             transcripts.append(transcription.text)
 
-        transcript_text = "\n".join(transcripts)
-        st.subheader("📄 Transcript")
-        st.text_area("Transcript", transcript_text, height=300)
+        # Aggregate transcripts
+        full_transcript = "\n".join(transcripts)
+        st.subheader("Transcript")
+        st.text_area("Transcript", full_transcript, height=200)
 
-        # Summarize transcript
+        # Summarize
         prompt = f"""
         You are a professional meeting assistant.
         Summarize this transcript into:
@@ -69,12 +57,11 @@ if uploaded_file:
         - Discussion Points
 
         Transcript:
-        {transcript_text}
+        {full_transcript}
         """
         response = gemini_model.generate_content(prompt)
-        summary_text = response.text
-        st.subheader("📝 Summary")
-        st.text_area("Summary", summary_text, height=300)
+        st.subheader("Summary")
+        st.text_area("Summary", response.text, height=200)
 
     except Exception as e:
         st.error(f"❌ Error: {str(e)}")
